@@ -14,16 +14,12 @@ from multiprocessing import Process, Manager, Lock
 
 
 DEBUG = True
+CHECK_SIZE = 2**17
+BKZ_MAX_LOOPS = 8
 
 manager = Manager()
 solution = manager.Value(list, [])
 lock = Lock()
-
-
-def shuffle(G):
-    M = [[_ for _ in row] for row in G]
-    random.shuffle(M)
-    return M
 
 
 class Solver:
@@ -45,6 +41,7 @@ class Solver:
 
         for i in range(2, self.n + 1):
             M[i] = [0] * (i - 2) + [hnp.q] + [0] * (self.n - i) + [0, 0]
+        
         M = IntegerMatrix.from_matrix(M)
         M = GSO.Mat(
                 M,
@@ -71,6 +68,10 @@ class Solver:
             return int(x)
 
     def lllPrep(self):
+        """
+        LLL preprocess 
+        """
+
         if DEBUG:
             s_time = time()
             print('[+] LLL')
@@ -81,7 +82,9 @@ class Solver:
             print(f'[+] LLL done  cost: {time() -  s_time} s')
     
     def bkzPrep(self):
-        max_loops = 8
+        """
+        BKZ preprocess, blocksize = dim(M) - 20
+        """
 
         block_size = self.M.d - 20
         
@@ -105,7 +108,7 @@ class Solver:
             s_time = time()
             print('[+] bkz loop')
 
-        for _ in range(max_loops):
+        for _ in range(BKZ_MAX_LOOPS):
             pump_n_jump_bkz_tour(g6k, tracer, block_size, pump_params={"down_sieve": True})
 
             if auto_abort.test_abort():
@@ -119,6 +122,9 @@ class Solver:
             print(f'[+] bkz loop done  cost: {time() -  s_time} s')
     
     def sieve(self):
+        """
+        sieve use G6K
+        """
 
         params = SieverParams(reserved_n=self.M.d, otf_lift=False, threads=self.threads)
         g6k = Siever(self.M, params)
@@ -140,17 +146,33 @@ class Solver:
         self.g6k = g6k
     
     def findL2R(self, left, right):
+        """
+        find in database in [left, right)
+        """
 
-        for i in range(left, min(self.db_size, right)):
-            
-            v = self.g6k.M.B.multiply_left(self.db[i])
+        for i in range(left, right):
+
+            v = self.BB.multiply_left(self.db[i])
             if self.predicate(v):
                 lock.acquire()
                 solution.value = solution.value + [self.predicate(v)]
                 lock.release()
+    
+    def getDB(self):
+        res = []
+        for _ in range(CHECK_SIZE):
+            try:
+                res.append(self.itervalues.__next__())
+            except StopIteration:
+                return res, True
+        else:
+            return res, False
         
     def enumDatabase(self):
-        
+        """
+        enumerate the database
+        """
+
         g6k = self.g6k
         try:
             g6k()
@@ -177,27 +199,35 @@ class Solver:
         for i in range(g6k.M.d):
             if self.predicate(g6k.M.B[i]):
                 self.solution.append(self.predicate(g6k.M.B[i]))
-        self.db_size = g6k.db_size()
         
         if DEBUG:
             s_time = time()
-            print(f'[+] checking from the database with size {self.db_size}')
+            print(f'[+] checking from the database with size {g6k.db_size()}')
 
         self.g6k = g6k
-        self.db = list(g6k.itervalues())
-        process_list = []
-        gap = g6k.db_size() // self.threads
+        self.BB = self.g6k.M.B
+        self.itervalues = self.g6k.itervalues()
+        solution.value = []
 
-        for i in range(self.threads):
-            left, right = i * gap, (self.db_size if i == self.threads - 1 else (i + 1) * gap)
-            process = Process(target=self.findL2R, args=((left, right)))
-            process_list.append(process)
+        while True:
+            self.db, stopped = self.getDB()
+            self.db_size = len(self.db)
+            process_list = []
+            gap = self.db_size // self.threads
 
-        for t in process_list:
-            t.start()
+            for i in range(self.threads):
+                left, right = i * gap, (self.db_size if i == self.threads - 1 else (i + 1) * gap)
+                process = Process(target=self.findL2R, args=((left, right)))
+                process_list.append(process)
 
-        for t in process_list:
-            t.join()
+            for t in process_list:
+                t.start()
+
+            for t in process_list:
+                t.join()
+            
+            if stopped:
+                break
 
         self.solution = self.solution + solution.value
         solution.value = []
@@ -216,6 +246,7 @@ class Solver:
         self.miu = hnp.m - hnp.known
         self.eqs = hnp.eqs
 
+        # only used to accelerate the predicate 
         self.A = [_.a for _ in hnp.eqs]
         self.B = [_.k for _ in hnp.eqs]
 
@@ -224,6 +255,7 @@ class Solver:
         self.cw = 2 ** (self.miu - 1)
         self.ncw = -2 ** (self.miu - 1)
 
+        # generate the Lattice
         self.M = self.genLattice()
     
     def __call__(self, **kwds):
