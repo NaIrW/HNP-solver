@@ -142,7 +142,7 @@ class Solver:
     def findL2R(self, left, right):
 
         for i in range(left, min(self.db_size, right)):
-            pass
+            
             v = self.g6k.M.B.multiply_left(self.db[i])
             if self.predicate(v):
                 lock.acquire()
