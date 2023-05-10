@@ -31,8 +31,8 @@ class Solver:
 
         w = 2 ** (self.miu - 1)
 
-        A_ = [(a * int(invert(A[0], hnp.q))) % hnp.q for a in A]
-        B_ = [(b - a * B[0] + w  - w * a) % hnp.q for a, b in zip(A_, B)]
+        A_ = [(a * int(invert(A[0], self.hnp.q))) % self.hnp.q for a in A]
+        B_ = [(b - a * B[0] + w  - w * a) % self.hnp.q for a, b in zip(A_, B)]
 
         M = [[0 for _ in range(self.n + 1)] for _ in range(self.n + 1)]
 
@@ -40,7 +40,7 @@ class Solver:
         M[1] = B_[1:] + [0, w]
 
         for i in range(2, self.n + 1):
-            M[i] = [0] * (i - 2) + [hnp.q] + [0] * (self.n - i) + [0, 0]
+            M[i] = [0] * (i - 2) + [self.hnp.q] + [0] * (self.n - i) + [0, 0]
         
         M = IntegerMatrix.from_matrix(M)
         M = GSO.Mat(
